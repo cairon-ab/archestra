@@ -128,7 +128,10 @@ export class Authnz {
       url.startsWith(`${INCOMING_EMAIL_WEBHOOK_PREFIX}?`) ||
       // ChatOps webhooks - Bot Framework calls these directly
       // JWT validation is handled by the Bot Framework adapter
-      url.startsWith("/api/webhooks/chatops/")
+      url.startsWith("/api/webhooks/chatops/") ||
+      // MCP Apps sandbox proxy — iframe served with CSP headers, no auth needed
+      // Origin validation and message relay security is handled by the HTML itself
+      url === "/_sandbox"
     ) {
       return true;
     }

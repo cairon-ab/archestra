@@ -79,6 +79,10 @@ import { ExpiredAuthTool } from "./expired-auth-tool";
 import { InlineChatError } from "./inline-chat-error";
 import { hasKnowledgeBaseToolCall } from "./knowledge-graph-citations";
 import { McpInstallDialogs } from "./mcp-install-dialogs";
+import {
+  type McpToolOutput,
+  McpAppSection,
+} from "./mcp-app-container";
 import { PolicyDeniedTool } from "./policy-denied-tool";
 import { TodoWriteTool } from "./todo-write-tool";
 import { ToolErrorLogsButton } from "./tool-error-logs-button";
@@ -1117,11 +1121,25 @@ function MessageTool({
   const isExpandable =
     hasContent && (canExpandToolCalls || isApprovalRequested);
 
+  // Detect MCP App UI resource URI in tool output metadata
+  // When present, render an interactive MCP App iframe below the tool collapsible
+  const effectiveRawOutput = toolResultPart?.output ?? part.output;
+  const mcpToolOutput =
+    effectiveRawOutput &&
+    typeof effectiveRawOutput === "object" &&
+    !Array.isArray(effectiveRawOutput)
+      ? (effectiveRawOutput as McpToolOutput)
+      : null;
+  const uiResourceUri =
+    (mcpToolOutput?._meta as { ui?: { resourceUri?: string } } | undefined)
+      ?.ui?.resourceUri;
+
   return (
-    <Tool
-      className={isExpandable ? "cursor-pointer" : ""}
-      defaultOpen={isApprovalRequested}
-    >
+    <>
+      <Tool
+        className={isExpandable ? "cursor-pointer" : ""}
+        defaultOpen={isApprovalRequested}
+      >
       <ToolHeader
         type={`tool-${toolName}`}
         state={getHeaderState({
@@ -1185,6 +1203,20 @@ function MessageTool({
         )}
       </ToolContent>
     </Tool>
+    {uiResourceUri && agentId && (
+      <McpAppSection
+        uiResourceUri={uiResourceUri}
+        agentId={agentId}
+        toolName={toolName}
+        toolInput={
+          part.input && typeof part.input === "object"
+            ? (part.input as Record<string, unknown>)
+            : undefined
+        }
+        rawOutput={mcpToolOutput ?? undefined}
+      />
+    )}
+    </>
   );
 }
 

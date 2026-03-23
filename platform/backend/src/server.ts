@@ -16,6 +16,9 @@ if (isMainModule) {
   await import("./observability/tracing/sdk");
 }
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import fastifyCors from "@fastify/cors";
 import fastifyFormbody from "@fastify/formbody";
 import fastifySwagger from "@fastify/swagger";
@@ -240,6 +243,87 @@ export async function registerApiRoutes(fastify: FastifyInstanceWithZod) {
   for (const route of Object.values(eeRoutes)) {
     fastify.register(route);
   }
+
+  // Serve the MCP Apps sandbox proxy HTML (double-iframe isolation for untrusted UI content)
+  // This serves at /_sandbox with no-auth since the iframe itself enforces origin validation.
+  // CSP is injected at serve time based on the configured frontend URL.
+  registerMcpSandboxRoute(fastify);
+}
+
+/**
+ * Register the /_sandbox route that serves the MCP Apps iframe proxy HTML.
+ * The sandbox HTML is a security boundary that isolates untrusted MCP App content.
+ * Allowed origins for postMessage are injected at serve time to prevent script breakout.
+ */
+function registerMcpSandboxRoute(fastify: FastifyInstanceWithZod) {
+  const __dirname = fileURLToPath(new URL(".", import.meta.url));
+  const sandboxHtmlPath = join(__dirname, "static", "mcp-sandbox-proxy.html");
+
+  let sandboxTemplate: string;
+  try {
+    sandboxTemplate = readFileSync(sandboxHtmlPath, "utf-8");
+  } catch {
+    fastify.log.warn(
+      { path: sandboxHtmlPath },
+      "MCP sandbox proxy HTML not found — MCP Apps will not render in-browser",
+    );
+    return;
+  }
+
+  // Build the allowed-origins list from the configured frontend URL(s).
+  // Empty array = open/dev mode (accept any origin).
+  const allowedOrigins: string[] = [];
+  const frontendUrl = config.api.corsOrigins;
+  if (Array.isArray(frontendUrl)) {
+    for (const origin of frontendUrl) {
+      if (typeof origin === "string" && origin.startsWith("http")) {
+        allowedOrigins.push(origin);
+      }
+    }
+  }
+
+  // HTML-escape the JSON to prevent script breakout via `</script>` injection
+  const escapedOrigins = JSON.stringify(allowedOrigins).replace(
+    /[<>&']/g,
+    (c) =>
+      ({
+        "<": "\\u003c",
+        ">": "\\u003e",
+        "&": "\\u0026",
+        "'": "\\u0027",
+      })[c] ?? c,
+  );
+
+  const sandboxHtml = sandboxTemplate.replace(
+    "__ARCHESTRA_ALLOWED_ORIGINS__",
+    escapedOrigins,
+  );
+
+  // Build frame-ancestors CSP: restrict which pages can embed the sandbox in an iframe.
+  // Defense-in-depth: this does not replace the JS-level origin validation, it
+  // supplements it. 'self' covers same-origin and dev deployments.
+  const frameAncestors =
+    allowedOrigins.length > 0
+      ? `'self' ${allowedOrigins.map((o) => new URL(o).origin).join(" ")}`
+      : "*";
+
+  fastify.get(
+    "/_sandbox",
+    {},
+    async (_request, reply) => {
+      reply
+        .header("Content-Type", "text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .header("X-Frame-Options", "SAMEORIGIN")
+        .header(
+          "Content-Security-Policy",
+          `default-src 'none'; script-src 'unsafe-inline'; frame-ancestors ${frameAncestors}`,
+        )
+        .send(sandboxHtml);
+    },
+  );
+
+  fastify.log.info("MCP Apps sandbox proxy registered at /_sandbox");
 }
 
 /**

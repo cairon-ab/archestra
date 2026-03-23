@@ -8,6 +8,32 @@ const environment: "development" | "production" =
 export const DEFAULT_BACKEND_URL = "http://localhost:9000";
 
 /**
+ * Get the MCP Apps sandbox base URL.
+ *
+ * The sandbox hosts the double-iframe proxy HTML that isolates untrusted MCP App content.
+ * In single-port deployments (default), this is the same origin as the backend API,
+ * served at /_sandbox. A separate port can be configured via
+ * NEXT_PUBLIC_ARCHESTRA_MCP_SANDBOX_BASE_URL for multi-port setups.
+ *
+ * NOTE: This is intentionally a build-time env var (NEXT_PUBLIC_* prefix) because
+ * it's an infrastructure URL that must be embedded in HTML at build time. It follows
+ * the same pattern as NEXT_PUBLIC_ARCHESTRA_API_BASE_URL for external proxy URLs.
+ *
+ * In development, this falls back to the backend URL (same origin) since the sandbox
+ * is served from /_sandbox path on the backend server.
+ */
+export const getMcpSandboxBaseUrl = (): string => {
+  // Prefer explicitly configured sandbox URL (multi-port setup)
+  const sandboxUrl = process.env.NEXT_PUBLIC_ARCHESTRA_MCP_SANDBOX_BASE_URL;
+  if (sandboxUrl) {
+    return sandboxUrl;
+  }
+
+  // Default: use the backend URL (same origin, /_sandbox path)
+  return getBackendBaseUrl();
+};
+
+/**
  * Get the backend API base URL.
  * Returns the configured URL or defaults to localhost:9000 for development.
  *
